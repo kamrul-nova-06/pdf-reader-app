@@ -1,0 +1,17 @@
+{
+  "name": "বাংলা PDF রিডার",
+  "short_name": "PDF Reader",
+  "description": "বাংলায় PDF পড়ার সেরা অভিজ্ঞতা",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fffbeb",
+  "theme_color": "#ea580c",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
