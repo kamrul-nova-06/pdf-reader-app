@@ -4,17 +4,361 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>বাংলা PDF রিডার</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#ea580c">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
+    <style>
+        @keyframes flip {
+            0% { transform: perspective(1000px) rotateY(0deg); }
+            50% { transform: perspective(1000px) rotateY(90deg); }
+            100% { transform: perspective(1000px) rotateY(0deg); }
+        }
+        .animate-flip { animation: flip 0.6s ease-in-out; }
+    </style>
 </head>
 <body>
     <div id="root"></div>
-    <script type="text/babel" src="app.js"></script>
+
+    <script>
+        // Simple icon components
+        const Icon = {
+            BookOpen: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
+            Home: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+            Plus: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+            Menu: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
+            X: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+            ZoomIn: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`,
+            ZoomOut: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`,
+            ChevronLeft: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>`,
+            ChevronRight: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`
+        };
+
+        class PDFReaderApp {
+            constructor() {
+                this.view = 'home';
+                this.pdfUrl = '';
+                this.savedPDFs = [];
+                this.currentPDF = null;
+                this.currentPage = 1;
+                this.totalPages = 1;
+                this.zoom = 1;
+                this.isFlipping = false;
+                this.drawerOpen = false;
+                this.pdfDoc = null;
+                
+                this.init();
+            }
+
+            init() {
+                const stored = localStorage.getItem('pdfLibrary');
+                if (stored) {
+                    this.savedPDFs = JSON.parse(stored);
+                }
+                this.render();
+            }
+
+            playPageFlipSound() {
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.frequency.setValueAtTime(200, audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.1);
+                    
+                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+                    
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.15);
+                } catch(e) {
+                    console.log('Audio not supported');
+                }
+            }
+
+            async loadPDF(url) {
+                try {
+                    const pdfjsLib = window['pdfjs-dist/build/pdf'];
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                    
+                    const loadingTask = pdfjsLib.getDocument(url);
+                    const pdf = await loadingTask.promise;
+                    this.pdfDoc = pdf;
+                    this.totalPages = pdf.numPages;
+                    this.currentPage = 1;
+                    await this.renderPage(1);
+                    
+                    const existingPDF = this.savedPDFs.find(p => p.url === url);
+                    
+                    if (!existingPDF) {
+                        const newPDF = {
+                            id: Date.now(),
+                            url: url,
+                            title: `PDF ${this.savedPDFs.length + 1}`,
+                            addedDate: new Date().toISOString(),
+                        };
+                        
+                        this.savedPDFs.push(newPDF);
+                        localStorage.setItem('pdfLibrary', JSON.stringify(this.savedPDFs));
+                        this.currentPDF = newPDF;
+                    } else {
+                        this.currentPDF = existingPDF;
+                    }
+                    
+                    this.view = 'reader';
+                    this.render();
+                } catch (error) {
+                    alert('PDF লোড করতে সমস্যা হয়েছে। অনুগ্রহ করে সঠিক লিংক দিন।');
+                    console.error(error);
+                }
+            }
+
+            async renderPage(pageNum) {
+                if (!this.pdfDoc) return;
+                
+                const page = await this.pdfDoc.getPage(pageNum);
+                const canvas = document.getElementById('pdfCanvas');
+                const context = canvas.getContext('2d');
+                
+                const viewport = page.getViewport({ scale: this.zoom * 1.5 });
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+            }
+
+            async changePage(direction) {
+                if (this.isFlipping) return;
+                
+                let newPage = this.currentPage;
+                if (direction === 'next' && this.currentPage < this.totalPages) {
+                    newPage = this.currentPage + 1;
+                } else if (direction === 'prev' && this.currentPage > 1) {
+                    newPage = this.currentPage - 1;
+                } else {
+                    return;
+                }
+                
+                this.isFlipping = true;
+                this.playPageFlipSound();
+                
+                const canvas = document.getElementById('pdfCanvas');
+                canvas.classList.add('animate-flip');
+                
+                setTimeout(async () => {
+                    this.currentPage = newPage;
+                    await this.renderPage(newPage);
+                    this.isFlipping = false;
+                    canvas.classList.remove('animate-flip');
+                    this.render();
+                }, 600);
+            }
+
+            handleZoom(direction) {
+                if (direction === 'in' && this.zoom < 2) {
+                    this.zoom += 0.2;
+                    this.renderPage(this.currentPage);
+                } else if (direction === 'out' && this.zoom > 0.6) {
+                    this.zoom -= 0.2;
+                    this.renderPage(this.currentPage);
+                }
+                this.render();
+            }
+
+            openExistingPDF(pdf) {
+                this.currentPDF = pdf;
+                this.loadPDF(pdf.url);
+                this.drawerOpen = false;
+            }
+
+            handleAddPDF() {
+                if (this.pdfUrl.trim()) {
+                    this.loadPDF(this.pdfUrl);
+                    this.pdfUrl = '';
+                }
+            }
+
+            deletePDF(id) {
+                this.savedPDFs = this.savedPDFs.filter(pdf => pdf.id !== id);
+                localStorage.setItem('pdfLibrary', JSON.stringify(this.savedPDFs));
+                this.render();
+            }
+
+            render() {
+                const root = document.getElementById('root');
+                root.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
+                        <!-- Header -->
+                        <div class="bg-gradient-to-r from-orange-600 to-red-600 text-white p-4 shadow-lg">
+                            <div class="max-w-7xl mx-auto flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <button onclick="app.drawerOpen = !app.drawerOpen; app.render();" class="p-2 hover:bg-white/20 rounded-lg transition-all">
+                                        ${Icon.Menu(24)}
+                                    </button>
+                                    ${Icon.BookOpen(32)}
+                                    <h1 class="text-2xl font-bold">বাংলা PDF রিডার</h1>
+                                </div>
+                                ${this.view === 'reader' ? `
+                                <button onclick="app.view = 'home'; app.render();" class="flex items-center gap-2 bg-white/20 px-4 py-2 rounded-lg hover:bg-white/30 transition-all">
+                                    ${Icon.Home(20)}
+                                    <span>হোম</span>
+                                </button>` : ''}
+                            </div>
+                        </div>
+
+                        <!-- Drawer -->
+                        <div class="fixed inset-y-0 left-0 w-80 bg-white shadow-2xl transform transition-transform duration-300 z-50 ${this.drawerOpen ? 'translate-x-0' : '-translate-x-full'}">
+                            <div class="p-4 border-b border-gray-200 flex justify-between items-center">
+                                <h2 class="text-xl font-bold text-gray-800">আমার লাইব্রেরি</h2>
+                                <button onclick="app.drawerOpen = false; app.render();" class="p-2 hover:bg-gray-100 rounded">
+                                    ${Icon.X(24)}
+                                </button>
+                            </div>
+                            <div class="p-4 overflow-y-auto h-full pb-20">
+                                ${this.savedPDFs.length === 0 ? 
+                                    '<p class="text-gray-500 text-center mt-10">কোনো PDF সংরক্ষিত নেই</p>' :
+                                    `<div class="grid grid-cols-2 gap-4">
+                                        ${this.savedPDFs.map(pdf => `
+                                            <div class="relative group">
+                                                <div onclick="app.openExistingPDF(${JSON.stringify(pdf).replace(/"/g, '&quot;')})" class="cursor-pointer">
+                                                    <div class="aspect-[3/4] bg-gradient-to-br from-orange-100 to-red-100 rounded-lg shadow-md group-hover:shadow-xl transition-all border-2 border-orange-200 flex items-center justify-center">
+                                                        ${Icon.BookOpen(48)}
+                                                    </div>
+                                                    <p class="mt-2 text-sm font-medium text-gray-700 truncate">${pdf.title}</p>
+                                                    <p class="text-xs text-gray-500">${new Date(pdf.addedDate).toLocaleDateString('bn-BD')}</p>
+                                                </div>
+                                                <button onclick="event.stopPropagation(); app.deletePDF(${pdf.id});" class="absolute top-2 right-2 bg-red-500 text-white w-6 h-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                                            </div>
+                                        `).join('')}
+                                    </div>`
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Overlay -->
+                        ${this.drawerOpen ? '<div onclick="app.drawerOpen = false; app.render();" class="fixed inset-0 bg-black/50 z-40"></div>' : ''}
+
+                        <!-- Main Content -->
+                        <div class="max-w-7xl mx-auto p-6">
+                            ${this.view === 'home' ? this.renderHome() : this.renderReader()}
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderHome() {
+                return `
+                    <div class="max-w-2xl mx-auto">
+                        <div class="bg-white rounded-2xl shadow-2xl p-8 mt-10">
+                            <div class="text-center mb-8">
+                                <div class="inline-block p-4 bg-gradient-to-br from-orange-500 to-red-500 rounded-full mb-4">
+                                    ${Icon.BookOpen(48)}
+                                </div>
+                                <h2 class="text-3xl font-bold text-gray-800 mb-2">নতুন PDF যোগ করুন</h2>
+                                <p class="text-gray-600">PDF এর লিংক দিয়ে পড়া শুরু করুন</p>
+                            </div>
+                            
+                            <div class="space-y-4">
+                                <input
+                                    id="pdfUrlInput"
+                                    type="text"
+                                    value="${this.pdfUrl}"
+                                    placeholder="PDF এর লিংক এখানে পেস্ট করুন"
+                                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-lg"
+                                    onkeypress="if(event.key === 'Enter') app.handleAddPDF()"
+                                    oninput="app.pdfUrl = this.value"
+                                />
+                                <button
+                                    onclick="app.handleAddPDF()"
+                                    class="w-full bg-gradient-to-r from-orange-600 to-red-600 text-white py-3 rounded-lg font-bold text-lg hover:from-orange-700 hover:to-red-700 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+                                >
+                                    ${Icon.Plus(24)}
+                                    PDF খুলুন
+                                </button>
+                            </div>
+
+                            <div class="mt-8 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                                <p class="text-sm text-amber-800">
+                                    💡 <strong>টিপস:</strong> যেকোনো PDF লিংক ব্যবহার করতে পারবেন। একবার খুললে পরেরবার আর লিংক লাগবে না!
+                                </p>
+                            </div>
+                        </div>
+
+                        ${this.savedPDFs.length > 0 ? `
+                        <div class="mt-10">
+                            <h3 class="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                                ${Icon.BookOpen(24)}
+                                সংরক্ষিত PDF সমূহ
+                            </h3>
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                ${this.savedPDFs.map(pdf => `
+                                    <div onclick="app.openExistingPDF(${JSON.stringify(pdf).replace(/"/g, '&quot;')})" class="cursor-pointer group">
+                                        <div class="aspect-[3/4] bg-gradient-to-br from-orange-100 to-red-100 rounded-xl shadow-lg group-hover:shadow-2xl transition-all border-2 border-orange-200 group-hover:border-orange-400 flex items-center justify-center transform group-hover:scale-105">
+                                            ${Icon.BookOpen(64)}
+                                        </div>
+                                        <p class="mt-3 text-center font-medium text-gray-700 truncate">${pdf.title}</p>
+                                        <p class="text-sm text-center text-gray-500">${new Date(pdf.addedDate).toLocaleDateString('bn-BD')}</p>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>` : ''}
+                    </div>
+                `;
+            }
+
+            renderReader() {
+                return `
+                    <div class="bg-white rounded-2xl shadow-2xl p-6">
+                        <div class="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
+                            <div class="flex items-center gap-4">
+                                <button
+                                    onclick="app.changePage('prev')"
+                                    ${this.currentPage === 1 || this.isFlipping ? 'disabled' : ''}
+                                    class="p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                                >
+                                    ${Icon.ChevronLeft(24)}
+                                </button>
+                                <span class="text-lg font-bold text-gray-700">
+                                    পৃষ্ঠা ${this.currentPage} / ${this.totalPages}
+                                </span>
+                                <button
+                                    onclick="app.changePage('next')"
+                                    ${this.currentPage === this.totalPages || this.isFlipping ? 'disabled' : ''}
+                                    class="p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                                >
+                                    ${Icon.ChevronRight(24)}
+                                </button>
+                            </div>
+
+                            <div class="flex items-center gap-2">
+                                <button onclick="app.handleZoom('out')" class="p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all">
+                                    ${Icon.ZoomOut(20)}
+                                </button>
+                                <span class="text-sm font-medium text-gray-600 w-16 text-center">
+                                    ${Math.round(this.zoom * 100)}%
+                                </span>
+                                <button onclick="app.handleZoom('in')" class="p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all">
+                                    ${Icon.ZoomIn(20)}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="relative overflow-auto max-h-[calc(100vh-250px)] bg-gray-100 rounded-lg flex items-center justify-center">
+                            <canvas id="pdfCanvas" class="shadow-2xl"></canvas>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Initialize app
+        const app = new PDFReaderApp();
+    </script>
 </body>
 </html>
