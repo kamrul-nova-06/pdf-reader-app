@@ -79,8 +79,22 @@
                 }
             }
 
+            convertDriveLink(url) {
+                // Convert Google Drive preview link to direct download link
+                if (url.includes('drive.google.com')) {
+                    const fileIdMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                    if (fileIdMatch) {
+                        return `https://drive.google.com/uc?export=download&id=${fileIdMatch[1]}`;
+                    }
+                }
+                return url;
+            }
+
             async loadPDF(url) {
                 try {
+                    // Convert Google Drive links automatically
+                    url = this.convertDriveLink(url);
+                    
                     const pdfjsLib = window['pdfjs-dist/build/pdf'];
                     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
                     
@@ -111,7 +125,7 @@
                     this.view = 'reader';
                     this.render();
                 } catch (error) {
-                    alert('PDF লোড করতে সমস্যা হয়েছে। অনুগ্রহ করে সঠিক লিংক দিন।');
+                    alert('PDF লোড করতে সমস্যা হয়েছে। অনুগ্রহ করে:\n\n১. Google Drive লিংক হলে শেয়ার সেটিংস "Anyone with the link" করুন\n২. সঠিক PDF লিংক দিন\n৩. অথবা অন্য কোনো PDF লিংক ব্যবহার করুন');
                     console.error(error);
                 }
             }
@@ -285,7 +299,11 @@
 
                             <div class="mt-8 p-4 bg-amber-50 rounded-lg border border-amber-200">
                                 <p class="text-sm text-amber-800">
-                                    💡 <strong>টিপস:</strong> যেকোনো PDF লিংক ব্যবহার করতে পারবেন। একবার খুললে পরেরবার আর লিংক লাগবে না!
+                                    💡 <strong>Google Drive টিপস:</strong><br>
+                                    ১. Drive এ PDF খুলুন<br>
+                                    ২. Share → "Anyone with the link" করুন<br>
+                                    ৩. লিংক কপি করে এখানে পেস্ট করুন<br>
+                                    (অ্যাপ অটোমেটিক সঠিক করে নেবে!)
                                 </p>
                             </div>
                         </div>
@@ -315,42 +333,42 @@
             renderReader() {
                 return `
                     <div class="bg-white rounded-2xl shadow-2xl p-6">
-                        <div class="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-                            <div class="flex items-center gap-4">
+                        <div class="flex flex-wrap items-center justify-between mb-6 pb-4 border-b border-gray-200 gap-4">
+                            <div class="flex items-center gap-2">
                                 <button
                                     onclick="app.changePage('prev')"
                                     ${this.currentPage === 1 || this.isFlipping ? 'disabled' : ''}
-                                    class="p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                                    class="p-2 md:p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
                                 >
-                                    ${Icon.ChevronLeft(24)}
+                                    ${Icon.ChevronLeft(20)}
                                 </button>
-                                <span class="text-lg font-bold text-gray-700">
+                                <span class="text-sm md:text-lg font-bold text-gray-700 px-2">
                                     পৃষ্ঠা ${this.currentPage} / ${this.totalPages}
                                 </span>
                                 <button
                                     onclick="app.changePage('next')"
                                     ${this.currentPage === this.totalPages || this.isFlipping ? 'disabled' : ''}
-                                    class="p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                                    class="p-2 md:p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
                                 >
-                                    ${Icon.ChevronRight(24)}
+                                    ${Icon.ChevronRight(20)}
                                 </button>
                             </div>
 
                             <div class="flex items-center gap-2">
-                                <button onclick="app.handleZoom('out')" class="p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all">
-                                    ${Icon.ZoomOut(20)}
+                                <button onclick="app.handleZoom('out')" class="p-2 md:p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all">
+                                    ${Icon.ZoomOut(18)}
                                 </button>
-                                <span class="text-sm font-medium text-gray-600 w-16 text-center">
+                                <span class="text-xs md:text-sm font-medium text-gray-600 w-12 md:w-16 text-center">
                                     ${Math.round(this.zoom * 100)}%
                                 </span>
-                                <button onclick="app.handleZoom('in')" class="p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all">
-                                    ${Icon.ZoomIn(20)}
+                                <button onclick="app.handleZoom('in')" class="p-2 md:p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all">
+                                    ${Icon.ZoomIn(18)}
                                 </button>
                             </div>
                         </div>
 
                         <div class="relative overflow-auto max-h-[calc(100vh-250px)] bg-gray-100 rounded-lg flex items-center justify-center">
-                            <canvas id="pdfCanvas" class="shadow-2xl"></canvas>
+                            <canvas id="pdfCanvas" class="shadow-2xl max-w-full"></canvas>
                         </div>
                     </div>
                 `;
