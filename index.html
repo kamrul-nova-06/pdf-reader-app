@@ -1,323 +1,497 @@
-<!DOCTYPE html>
-<html lang="bn">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>বাংলা PDF রিডার</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
-    <style>
-        @keyframes flip {
-            0% { transform: perspective(1000px) rotateY(0deg); }
-            50% { transform: perspective(1000px) rotateY(90deg); }
-            100% { transform: perspective(1000px) rotateY(0deg); }
-        }
-        .animate-flip { animation: flip 0.6s ease-in-out; }
-        
-        .pdf-iframe {
-            width: 100%;
-            height: calc(100vh - 200px);
-            border: none;
-            border-radius: 8px;
-        }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+import React, { useState, useEffect, useRef } from 'react';
+import { BookOpen, Home, Plus, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Menu, X, Upload } from 'lucide-react';
 
-    <script>
-        // Simple icon components
-        const Icon = {
-            BookOpen: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
-            Home: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
-            Plus: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-            Menu: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
-            X: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
-            ExternalLink: (size = 24) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`
+const PDFReaderApp = () => {
+  const [view, setView] = useState('home');
+  const [pdfUrl, setPdfUrl] = useState('');
+  const [savedPDFs, setSavedPDFs] = useState([]);
+  const [currentPDF, setCurrentPDF] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [zoom, setZoom] = useState(1);
+  const [isFlipping, setIsFlipping] = useState(false);
+  const [flipDirection, setFlipDirection] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const canvasRef = useRef(null);
+  const pdfDocRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const stored = JSON.parse(localStorage.getItem('pdfLibrary') || '[]');
+    setSavedPDFs(stored);
+  }, []);
+
+  const playPageFlipSound = () => {
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(200, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.15);
+    } catch(e) {
+      console.log('Audio not supported');
+    }
+  };
+
+  const extractFileId = (url) => {
+    const patterns = [
+      /\/file\/d\/([a-zA-Z0-9_-]+)/,
+      /id=([a-zA-Z0-9_-]+)/,
+      /\/d\/([a-zA-Z0-9_-]+)/
+    ];
+    
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file || file.type !== 'application/pdf') {
+      alert('অনুগ্রহ করে একটি PDF ফাইল নির্বাচন করুন।');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      await loadPDFFromData(e.target.result, file.name);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const loadPDFFromData = async (dataUrl, fileName) => {
+    try {
+      setLoading(true);
+      const pdfjsLib = window['pdfjs-dist/build/pdf'];
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      
+      const loadingTask = pdfjsLib.getDocument(dataUrl);
+      const pdf = await loadingTask.promise;
+      pdfDocRef.current = pdf;
+      setTotalPages(pdf.numPages);
+      setCurrentPage(1);
+      await renderPage(1, pdf);
+      
+      const newPDF = {
+        id: Date.now(),
+        data: dataUrl,
+        title: fileName || `PDF ${savedPDFs.length + 1}`,
+        addedDate: new Date().toISOString(),
+        isLocal: true
+      };
+      
+      const updatedPDFs = [...savedPDFs, newPDF];
+      setSavedPDFs(updatedPDFs);
+      localStorage.setItem('pdfLibrary', JSON.stringify(updatedPDFs));
+      setCurrentPDF(newPDF);
+      setView('reader');
+      setLoading(false);
+    } catch (error) {
+      setLoading(false);
+      alert('PDF লোড করতে সমস্যা হয়েছে।');
+      console.error(error);
+    }
+  };
+
+  const loadPDF = async (url) => {
+    try {
+      setLoading(true);
+      let pdfData = url;
+      
+      // Check if it's a Google Drive link
+      if (url.includes('drive.google.com')) {
+        const fileId = extractFileId(url);
+        if (fileId) {
+          // Use direct download link
+          pdfData = `https://drive.google.com/uc?export=download&id=${fileId}`;
+        }
+      }
+
+      const pdfjsLib = window['pdfjs-dist/build/pdf'];
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      
+      const loadingTask = pdfjsLib.getDocument({ url: pdfData, withCredentials: false });
+      const pdf = await loadingTask.promise;
+      pdfDocRef.current = pdf;
+      setTotalPages(pdf.numPages);
+      setCurrentPage(1);
+      await renderPage(1, pdf);
+      
+      const existingPDF = savedPDFs.find(p => p.url === url);
+      
+      if (!existingPDF) {
+        const newPDF = {
+          id: Date.now(),
+          url: url,
+          title: `PDF ${savedPDFs.length + 1}`,
+          addedDate: new Date().toISOString(),
         };
+        
+        const updatedPDFs = [...savedPDFs, newPDF];
+        setSavedPDFs(updatedPDFs);
+        localStorage.setItem('pdfLibrary', JSON.stringify(updatedPDFs));
+        setCurrentPDF(newPDF);
+      } else {
+        setCurrentPDF(existingPDF);
+      }
+      
+      setView('reader');
+      setLoading(false);
+    } catch (error) {
+      setLoading(false);
+      alert('PDF লোড করতে সমস্যা হয়েছে।\n\nসমাধান:\n১. Google Drive হলে শেয়ার সেটিংস চেক করুন\n২. অথবা ফাইল আপলোড বাটন ব্যবহার করুন (📤)');
+      console.error(error);
+    }
+  };
 
-        class PDFReaderApp {
-            constructor() {
-                this.view = 'home';
-                this.pdfUrl = '';
-                this.savedPDFs = [];
-                this.currentPDF = null;
-                this.drawerOpen = false;
-                this.useIframe = false;
-                
-                this.init();
-            }
+  const renderPage = async (pageNum, pdf = pdfDocRef.current) => {
+    if (!pdf) return;
+    
+    const page = await pdf.getPage(pageNum);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const context = canvas.getContext('2d');
+    const viewport = page.getViewport({ scale: zoom * 1.5 });
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+    
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise;
+  };
 
-            init() {
-                const stored = localStorage.getItem('pdfLibrary');
-                if (stored) {
-                    this.savedPDFs = JSON.parse(stored);
-                }
-                this.render();
-            }
+  const changePage = async (direction) => {
+    if (isFlipping) return;
+    
+    let newPage = currentPage;
+    if (direction === 'next' && currentPage < totalPages) {
+      newPage = currentPage + 1;
+      setFlipDirection('next');
+    } else if (direction === 'prev' && currentPage > 1) {
+      newPage = currentPage - 1;
+      setFlipDirection('prev');
+    } else {
+      return;
+    }
+    
+    setIsFlipping(true);
+    playPageFlipSound();
+    
+    setTimeout(async () => {
+      setCurrentPage(newPage);
+      await renderPage(newPage);
+      setIsFlipping(false);
+    }, 600);
+  };
 
-            extractFileId(url) {
-                // Extract file ID from various Google Drive URL formats
-                const patterns = [
-                    /\/file\/d\/([a-zA-Z0-9_-]+)/,
-                    /id=([a-zA-Z0-9_-]+)/,
-                    /\/d\/([a-zA-Z0-9_-]+)/
-                ];
-                
-                for (const pattern of patterns) {
-                    const match = url.match(pattern);
-                    if (match) return match[1];
-                }
-                return null;
-            }
+  const handleZoom = (direction) => {
+    if (direction === 'in' && zoom < 2) {
+      const newZoom = zoom + 0.2;
+      setZoom(newZoom);
+      renderPage(currentPage);
+    } else if (direction === 'out' && zoom > 0.6) {
+      const newZoom = zoom - 0.2;
+      setZoom(newZoom);
+      renderPage(currentPage);
+    }
+  };
 
-            convertToViewerUrl(url) {
-                // Check if it's a Google Drive link
-                if (url.includes('drive.google.com')) {
-                    const fileId = this.extractFileId(url);
-                    if (fileId) {
-                        // Use Google Drive's embedded viewer
-                        return `https://drive.google.com/file/d/${fileId}/preview`;
-                    }
-                }
-                
-                // For other PDFs, use Google Docs Viewer as fallback
-                return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
-            }
+  const openExistingPDF = async (pdf) => {
+    setCurrentPDF(pdf);
+    if (pdf.isLocal && pdf.data) {
+      await loadPDFFromData(pdf.data, pdf.title);
+    } else {
+      await loadPDF(pdf.url);
+    }
+    setDrawerOpen(false);
+  };
 
-            async loadPDF(url, originalUrl = null) {
-                try {
-                    this.useIframe = url.includes('drive.google.com') || url.includes('docs.google.com');
-                    
-                    const viewerUrl = this.convertToViewerUrl(url);
-                    
-                    const existingPDF = this.savedPDFs.find(p => p.originalUrl === (originalUrl || url));
-                    
-                    if (!existingPDF) {
-                        const newPDF = {
-                            id: Date.now(),
-                            url: viewerUrl,
-                            originalUrl: originalUrl || url,
-                            title: `PDF ${this.savedPDFs.length + 1}`,
-                            addedDate: new Date().toISOString(),
-                            isDrive: url.includes('drive.google.com')
-                        };
-                        
-                        this.savedPDFs.push(newPDF);
-                        localStorage.setItem('pdfLibrary', JSON.stringify(this.savedPDFs));
-                        this.currentPDF = newPDF;
-                    } else {
-                        this.currentPDF = existingPDF;
-                    }
-                    
-                    this.view = 'reader';
-                    this.render();
-                } catch (error) {
-                    alert('PDF লোড করতে সমস্যা হয়েছে।\n\nঅনুগ্রহ করে নিশ্চিত করুন:\n১. Google Drive শেয়ার সেটিংস "Anyone with the link" আছে\n২. PDF লিংক সঠিক আছে');
-                    console.error(error);
-                }
-            }
+  const handleAddPDF = () => {
+    if (pdfUrl.trim()) {
+      loadPDF(pdfUrl);
+      setPdfUrl('');
+    }
+  };
 
-            openExistingPDF(pdf) {
-                this.currentPDF = pdf;
-                this.useIframe = pdf.isDrive || pdf.url.includes('drive.google.com');
-                this.view = 'reader';
-                this.drawerOpen = false;
-                this.render();
-            }
+  const deletePDF = (id) => {
+    if (window.confirm('এই PDF মুছে ফেলবেন?')) {
+      const updatedPDFs = savedPDFs.filter(pdf => pdf.id !== id);
+      setSavedPDFs(updatedPDFs);
+      localStorage.setItem('pdfLibrary', JSON.stringify(updatedPDFs));
+    }
+  };
 
-            handleAddPDF() {
-                if (this.pdfUrl.trim()) {
-                    this.loadPDF(this.pdfUrl.trim());
-                    this.pdfUrl = '';
-                }
-            }
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf"
+        onChange={handleFileUpload}
+        className="hidden"
+      />
 
-            deletePDF(id) {
-                if (confirm('এই PDF মুছে ফেলবেন?')) {
-                    this.savedPDFs = this.savedPDFs.filter(pdf => pdf.id !== id);
-                    localStorage.setItem('pdfLibrary', JSON.stringify(this.savedPDFs));
-                    this.render();
-                }
-            }
+      {loading && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-8 text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-orange-600 mx-auto mb-4"></div>
+            <p className="text-lg font-bold text-gray-800">PDF লোড হচ্ছে...</p>
+          </div>
+        </div>
+      )}
+      
+      {/* Header */}
+      <div className="bg-gradient-to-r from-orange-600 to-red-600 text-white p-4 shadow-lg sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setDrawerOpen(!drawerOpen)}
+              className="p-2 hover:bg-white/20 rounded-lg transition-all"
+            >
+              <Menu size={24} />
+            </button>
+            <BookOpen size={32} />
+            <h1 className="text-xl md:text-2xl font-bold">বাংলা PDF রিডার</h1>
+          </div>
+          {view === 'reader' && (
+            <button 
+              onClick={() => setView('home')}
+              className="flex items-center gap-2 bg-white/20 px-4 py-2 rounded-lg hover:bg-white/30 transition-all"
+            >
+              <Home size={20} />
+              <span className="hidden md:inline">হোম</span>
+            </button>
+          )}
+        </div>
+      </div>
 
-            openInNewTab() {
-                if (this.currentPDF && this.currentPDF.originalUrl) {
-                    window.open(this.currentPDF.originalUrl, '_blank');
-                }
-            }
-
-            render() {
-                const root = document.getElementById('root');
-                root.innerHTML = `
-                    <div class="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
-                        <!-- Header -->
-                        <div class="bg-gradient-to-r from-orange-600 to-red-600 text-white p-4 shadow-lg">
-                            <div class="max-w-7xl mx-auto flex items-center justify-between">
-                                <div class="flex items-center gap-3">
-                                    <button onclick="app.drawerOpen = !app.drawerOpen; app.render();" class="p-2 hover:bg-white/20 rounded-lg transition-all">
-                                        ${Icon.Menu(24)}
-                                    </button>
-                                    ${Icon.BookOpen(32)}
-                                    <h1 class="text-xl md:text-2xl font-bold">বাংলা PDF রিডার</h1>
-                                </div>
-                                ${this.view === 'reader' ? `
-                                <div class="flex items-center gap-2">
-                                    <button onclick="app.openInNewTab()" class="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-all" title="নতুন ট্যাবে খুলুন">
-                                        ${Icon.ExternalLink(20)}
-                                    </button>
-                                    <button onclick="app.view = 'home'; app.render();" class="flex items-center gap-2 bg-white/20 px-3 py-2 rounded-lg hover:bg-white/30 transition-all">
-                                        ${Icon.Home(20)}
-                                        <span class="hidden md:inline">হোম</span>
-                                    </button>
-                                </div>` : ''}
-                            </div>
-                        </div>
-
-                        <!-- Drawer -->
-                        <div class="fixed inset-y-0 left-0 w-80 bg-white shadow-2xl transform transition-transform duration-300 z-50 ${this.drawerOpen ? 'translate-x-0' : '-translate-x-full'}">
-                            <div class="p-4 border-b border-gray-200 flex justify-between items-center">
-                                <h2 class="text-xl font-bold text-gray-800">আমার লাইব্রেরি</h2>
-                                <button onclick="app.drawerOpen = false; app.render();" class="p-2 hover:bg-gray-100 rounded">
-                                    ${Icon.X(24)}
-                                </button>
-                            </div>
-                            <div class="p-4 overflow-y-auto h-full pb-20">
-                                ${this.savedPDFs.length === 0 ? 
-                                    '<p class="text-gray-500 text-center mt-10">কোনো PDF সংরক্ষিত নেই</p>' :
-                                    `<div class="grid grid-cols-2 gap-4">
-                                        ${this.savedPDFs.map(pdf => `
-                                            <div class="relative group">
-                                                <div onclick='app.openExistingPDF(${JSON.stringify(pdf).replace(/'/g, "\\'")}); event.stopPropagation();' class="cursor-pointer">
-                                                    <div class="aspect-[3/4] bg-gradient-to-br from-orange-100 to-red-100 rounded-lg shadow-md group-hover:shadow-xl transition-all border-2 border-orange-200 flex items-center justify-center relative">
-                                                        ${Icon.BookOpen(48)}
-                                                        ${pdf.isDrive ? '<span class="absolute bottom-2 right-2 text-xs bg-white px-2 py-1 rounded">Drive</span>' : ''}
-                                                    </div>
-                                                    <p class="mt-2 text-sm font-medium text-gray-700 truncate">${pdf.title}</p>
-                                                    <p class="text-xs text-gray-500">${new Date(pdf.addedDate).toLocaleDateString('bn-BD')}</p>
-                                                </div>
-                                                <button onclick="event.stopPropagation(); app.deletePDF(${pdf.id});" class="absolute top-2 right-2 bg-red-500 text-white w-6 h-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity text-lg leading-none">×</button>
-                                            </div>
-                                        `).join('')}
-                                    </div>`
-                                }
-                            </div>
-                        </div>
-
-                        <!-- Overlay -->
-                        ${this.drawerOpen ? '<div onclick="app.drawerOpen = false; app.render();" class="fixed inset-0 bg-black/50 z-40"></div>' : ''}
-
-                        <!-- Main Content -->
-                        <div class="max-w-7xl mx-auto p-4 md:p-6">
-                            ${this.view === 'home' ? this.renderHome() : this.renderReader()}
-                        </div>
+      {/* Drawer */}
+      <div className={`fixed inset-y-0 left-0 w-80 bg-white shadow-2xl transform transition-transform duration-300 z-50 ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center">
+          <h2 className="text-xl font-bold text-gray-800">আমার লাইব্রেরি</h2>
+          <button onClick={() => setDrawerOpen(false)} className="p-2 hover:bg-gray-100 rounded">
+            <X size={24} />
+          </button>
+        </div>
+        <div className="p-4 overflow-y-auto h-full pb-20">
+          {savedPDFs.length === 0 ? (
+            <p className="text-gray-500 text-center mt-10">কোনো PDF সংরক্ষিত নেই</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              {savedPDFs.map((pdf) => (
+                <div key={pdf.id} className="relative group">
+                  <div 
+                    onClick={() => openExistingPDF(pdf)}
+                    className="cursor-pointer"
+                  >
+                    <div className="aspect-[3/4] bg-gradient-to-br from-orange-100 to-red-100 rounded-lg shadow-md group-hover:shadow-xl transition-all border-2 border-orange-200 flex items-center justify-center relative">
+                      <BookOpen size={48} className="text-orange-600" />
+                      {pdf.isLocal && (
+                        <span className="absolute top-2 left-2 text-xs bg-green-500 text-white px-2 py-1 rounded">📱</span>
+                      )}
                     </div>
-                `;
-            }
+                    <p className="mt-2 text-sm font-medium text-gray-700 truncate">{pdf.title}</p>
+                    <p className="text-xs text-gray-500">{new Date(pdf.addedDate).toLocaleDateString('bn-BD')}</p>
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deletePDF(pdf.id); }}
+                    className="absolute top-2 right-2 bg-red-500 text-white w-6 h-6 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  >×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
-            renderHome() {
-                return `
-                    <div class="max-w-2xl mx-auto">
-                        <div class="bg-white rounded-2xl shadow-2xl p-6 md:p-8 mt-10">
-                            <div class="text-center mb-8">
-                                <div class="inline-block p-4 bg-gradient-to-br from-orange-500 to-red-500 rounded-full mb-4">
-                                    ${Icon.BookOpen(48)}
-                                </div>
-                                <h2 class="text-2xl md:text-3xl font-bold text-gray-800 mb-2">নতুন PDF যোগ করুন</h2>
-                                <p class="text-gray-600">Google Drive বা যেকোনো PDF লিংক দিন</p>
-                            </div>
-                            
-                            <div class="space-y-4">
-                                <input
-                                    id="pdfUrlInput"
-                                    type="text"
-                                    value="${this.pdfUrl}"
-                                    placeholder="PDF লিংক পেস্ট করুন"
-                                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-base md:text-lg"
-                                    onkeypress="if(event.key === 'Enter') app.handleAddPDF()"
-                                    oninput="app.pdfUrl = this.value"
-                                />
-                                <button
-                                    onclick="app.handleAddPDF()"
-                                    class="w-full bg-gradient-to-r from-orange-600 to-red-600 text-white py-3 rounded-lg font-bold text-lg hover:from-orange-700 hover:to-red-700 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
-                                >
-                                    ${Icon.Plus(24)}
-                                    PDF খুলুন
-                                </button>
-                            </div>
+      {/* Overlay */}
+      {drawerOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40"
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
 
-                            <div class="mt-8 p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg border-2 border-amber-200">
-                                <p class="text-sm text-amber-900 leading-relaxed">
-                                    <strong>📚 Google Drive টিপস:</strong><br><br>
-                                    <span class="inline-block mb-1">১. PDF Upload করুন Drive এ</span><br>
-                                    <span class="inline-block mb-1">২. Share → <strong>"Anyone with the link"</strong></span><br>
-                                    <span class="inline-block mb-1">৩. লিংক কপি করে এখানে পেস্ট করুন</span><br><br>
-                                    <span class="text-green-700">✅ সব ধরনের Drive লিংক সাপোর্ট করে!</span>
-                                </p>
-                            </div>
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto p-4 md:p-6">
+        {view === 'home' && (
+          <div className="max-w-2xl mx-auto">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 mt-10">
+              <div className="text-center mb-8">
+                <div className="inline-block p-4 bg-gradient-to-br from-orange-500 to-red-500 rounded-full mb-4">
+                  <BookOpen size={48} className="text-white" />
+                </div>
+                <h2 className="text-2xl md:text-3xl font-bold text-gray-800 mb-2">PDF যোগ করুন</h2>
+                <p className="text-gray-600">লিংক দিন অথবা ফাইল আপলোড করুন</p>
+              </div>
+              
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  value={pdfUrl}
+                  onChange={(e) => setPdfUrl(e.target.value)}
+                  placeholder="PDF লিংক পেস্ট করুন"
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none text-lg"
+                  onKeyPress={(e) => e.key === 'Enter' && handleAddPDF()}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={handleAddPDF}
+                    className="bg-gradient-to-r from-orange-600 to-red-600 text-white py-3 rounded-lg font-bold hover:from-orange-700 hover:to-red-700 transition-all shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Plus size={20} />
+                    লিংক খুলুন
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 rounded-lg font-bold hover:from-green-700 hover:to-emerald-700 transition-all shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Upload size={20} />
+                    ফাইল আপলোড
+                  </button>
+                </div>
+              </div>
 
-                            <div class="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                <p class="text-sm text-blue-800">
-                                    <strong>🔗 টেস্ট লিংক:</strong><br>
-                                    <code class="text-xs break-all">https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf</code>
-                                </p>
-                            </div>
-                        </div>
+              <div className="mt-8 p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border-2 border-green-200">
+                <p className="text-sm text-green-900 font-bold mb-2">✅ সেরা পদ্ধতি: ফাইল আপলোড</p>
+                <p className="text-sm text-green-800">
+                  • আপনার মোবাইল বা কম্পিউটার থেকে সরাসরি PDF খুলুন<br/>
+                  • ইন্টারনেট ছাড়াই পড়তে পারবেন<br/>
+                  • ১০০% বই এর মতো অভিজ্ঞতা!
+                </p>
+              </div>
 
-                        ${this.savedPDFs.length > 0 ? `
-                        <div class="mt-10">
-                            <h3 class="text-xl md:text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
-                                ${Icon.BookOpen(24)}
-                                সংরক্ষিত PDF সমূহ (${this.savedPDFs.length})
-                            </h3>
-                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
-                                ${this.savedPDFs.map(pdf => `
-                                    <div onclick='app.openExistingPDF(${JSON.stringify(pdf).replace(/'/g, "\\'")}); event.stopPropagation();' class="cursor-pointer group">
-                                        <div class="aspect-[3/4] bg-gradient-to-br from-orange-100 to-red-100 rounded-xl shadow-lg group-hover:shadow-2xl transition-all border-2 border-orange-200 group-hover:border-orange-400 flex items-center justify-center transform group-hover:scale-105 relative">
-                                            ${Icon.BookOpen(48)}
-                                            ${pdf.isDrive ? '<span class="absolute top-2 left-2 text-xs bg-white px-2 py-1 rounded shadow">📁 Drive</span>' : ''}
-                                        </div>
-                                        <p class="mt-3 text-center font-medium text-gray-700 truncate px-2">${pdf.title}</p>
-                                        <p class="text-xs text-center text-gray-500">${new Date(pdf.addedDate).toLocaleDateString('bn-BD')}</p>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>` : ''}
+              <div className="mt-4 p-4 bg-amber-50 rounded-lg border border-amber-200">
+                <p className="text-sm text-amber-800">
+                  💡 <strong>Google Drive টিপস:</strong><br/>
+                  Share → "Anyone with the link" করতে হবে
+                </p>
+              </div>
+            </div>
+
+            {savedPDFs.length > 0 && (
+              <div className="mt-10">
+                <h3 className="text-xl md:text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                  <BookOpen className="text-orange-600" />
+                  সংরক্ষিত PDF ({savedPDFs.length})
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+                  {savedPDFs.map((pdf) => (
+                    <div 
+                      key={pdf.id}
+                      onClick={() => openExistingPDF(pdf)}
+                      className="cursor-pointer group"
+                    >
+                      <div className="aspect-[3/4] bg-gradient-to-br from-orange-100 to-red-100 rounded-xl shadow-lg group-hover:shadow-2xl transition-all border-2 border-orange-200 group-hover:border-orange-400 flex items-center justify-center transform group-hover:scale-105 relative">
+                        <BookOpen size={48} className="text-orange-600" />
+                        {pdf.isLocal && (
+                          <span className="absolute top-2 left-2 text-xs bg-green-500 text-white px-2 py-1 rounded shadow">📱</span>
+                        )}
+                      </div>
+                      <p className="mt-3 text-center font-medium text-gray-700 truncate px-2">{pdf.title}</p>
+                      <p className="text-xs text-center text-gray-500">{new Date(pdf.addedDate).toLocaleDateString('bn-BD')}</p>
                     </div>
-                `;
-            }
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-            renderReader() {
-                return `
-                    <div class="bg-white rounded-xl md:rounded-2xl shadow-2xl p-3 md:p-6">
-                        <div class="mb-4">
-                            <h3 class="text-lg md:text-xl font-bold text-gray-800 mb-2">${this.currentPDF.title}</h3>
-                            <p class="text-xs md:text-sm text-gray-600">
-                                ${this.currentPDF.isDrive ? '📁 Google Drive PDF' : '🔗 External PDF'}
-                            </p>
-                        </div>
+        {view === 'reader' && (
+          <div className="bg-white rounded-2xl shadow-2xl p-4 md:p-6">
+            {/* Controls */}
+            <div className="flex flex-wrap items-center justify-between mb-6 pb-4 border-b border-gray-200 gap-4">
+              <div className="flex items-center gap-2 md:gap-4">
+                <button
+                  onClick={() => changePage('prev')}
+                  disabled={currentPage === 1 || isFlipping}
+                  className="p-2 md:p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+                <span className="text-base md:text-lg font-bold text-gray-700 px-2">
+                  পৃষ্ঠা {currentPage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => changePage('next')}
+                  disabled={currentPage === totalPages || isFlipping}
+                  className="p-2 md:p-3 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"
+                >
+                  <ChevronRight size={24} />
+                </button>
+              </div>
 
-                        <div class="relative bg-gray-100 rounded-lg overflow-hidden" style="height: calc(100vh - 220px);">
-                            <iframe 
-                                src="${this.currentPDF.url}" 
-                                class="pdf-iframe"
-                                allow="autoplay"
-                            ></iframe>
-                        </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleZoom('out')}
+                  className="p-2 md:p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all"
+                >
+                  <ZoomOut size={20} />
+                </button>
+                <span className="text-sm font-medium text-gray-600 w-14 text-center">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <button
+                  onClick={() => handleZoom('in')}
+                  className="p-2 md:p-3 bg-gray-200 hover:bg-gray-300 rounded-lg transition-all"
+                >
+                  <ZoomIn size={20} />
+                </button>
+              </div>
+            </div>
 
-                        <div class="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
-                            <p class="text-xs md:text-sm text-amber-800 text-center">
-                                💡 <strong>টিপস:</strong> পেজ পরিবর্তন করতে PDF এর নিজস্ব বাটন ব্যবহার করুন
-                            </p>
-                        </div>
-                    </div>
-                `;
-            }
+            {/* PDF Viewer */}
+            <div className="relative overflow-auto max-h-[calc(100vh-250px)] bg-gray-100 rounded-lg flex items-center justify-center p-4">
+              <canvas 
+                ref={canvasRef}
+                className={`shadow-2xl max-w-full transition-all duration-600 ${isFlipping ? 'animate-flip' : ''}`}
+                style={{ transformStyle: 'preserve-3d' }}
+              />
+            </div>
+
+            <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+              <p className="text-xs md:text-sm text-amber-800 text-center">
+                📖 <strong>বই এর মতো পড়ার অভিজ্ঞতা!</strong> বাটনে ক্লিক করে পেজ উল্টান
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        @keyframes flip {
+          0% {
+            transform: perspective(1000px) rotateY(0deg);
+          }
+          50% {
+            transform: perspective(1000px) rotateY(90deg);
+          }
+          100% {
+            transform: perspective(1000px) rotateY(0deg);
+          }
         }
+        .animate-flip {
+          animation: flip 0.6s ease-in-out;
+        }
+      `}</style>
+    </div>
+  );
+};
 
-        // Initialize app
-        const app = new PDFReaderApp();
-    </script>
-</body>
-</html>
+export default PDFReaderApp;
